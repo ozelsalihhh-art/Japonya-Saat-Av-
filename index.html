@@ -552,7 +552,7 @@
       <h3 id="catalogModalTitle">Fiyat Ekle</h3>
       <div class="modal-close" data-close="modal-catalog">✕</div>
     </div>
-    <div class="field">
+    <div class="field" style="display:none;">
       <label>Model Seç</label>
       <select id="catalogModelSelect"></select>
     </div>
@@ -715,7 +715,6 @@
   const fab = document.getElementById("fab");
   const fabActions = {
     models: ()=>openModelModal(null),
-    catalog: ()=>openCatalogModal(null),
     field: ()=>openFieldModal(null)
   };
   let currentView = "dashboard";
@@ -820,26 +819,25 @@
   /* ============ RENDER: CATALOG ============ */
   function renderCatalog(){
     const list = document.getElementById("catalogList");
-    const ids = Object.keys(db.catalog);
-    if(ids.length===0){
-      list.innerHTML = emptyHtml("📋","Henüz fiyat kaydı yok.","İlk fiyatı ekle","catalog");
+    if(db.models.length===0){
+      list.innerHTML = emptyHtml("📋","Henüz model eklemedin. Önce Model Vitrini'ne saat ekle.","Model Ekle","models");
       bindEmptyCta(list);
       return;
     }
-    list.innerHTML = ids.map(id=>{
-      const m = modelById(id);
-      const c = db.catalog[id];
-      const limit = computeLimit(id);
+    list.innerHTML = db.models.map(m=>{
+      const c = db.catalog[m.id];
+      const limit = c ? computeLimit(m.id) : null;
+      const figures = c
+        ? `<span class="pill">TR: ${fmtTl(c.trPrice)}</span>
+           <span class="pill">2.El: ${fmtTl(c.trUsed)}</span>
+           <span class="pill gold">Alt Limit: ${limit!==null ? fmtYen(limit) : "kur bekleniyor"}</span>`
+        : `<span class="pill gold">Fiyat girilmedi — dokun</span>`;
       return `
-      <div class="item" data-open-catalog="${id}">
-        <div class="thumb">${m && m.photo ? `<img src="${m.photo}">` : "⌚"}</div>
+      <div class="item" data-open-catalog="${m.id}">
+        <div class="thumb">${m.photo ? `<img src="${m.photo}">` : "⌚"}</div>
         <div class="info">
-          <div class="row1"><div class="name">${m ? esc(modelLabel(m)) : "Silinmiş model"}</div></div>
-          <div class="figures">
-            <span class="pill">TR: ${fmtTl(c.trPrice)}</span>
-            <span class="pill">2.El: ${fmtTl(c.trUsed)}</span>
-            <span class="pill gold">Alt Limit: ${limit!==null ? fmtYen(limit) : "kur bekleniyor"}</span>
-          </div>
+          <div class="row1"><div class="name">${esc(modelLabel(m))}</div></div>
+          <div class="figures">${figures}</div>
         </div>
       </div>`;
     }).join("");
@@ -1178,7 +1176,7 @@
     const editContextBtn = document.getElementById("detailEditContextBtn");
     if(opts.editTarget==="catalog"){
       editContextBtn.style.display = "block";
-      editContextBtn.textContent = "Fiyatı Düzenle";
+      editContextBtn.textContent = c ? "Fiyatı Düzenle" : "Fiyat Gir";
       editContextBtn.onclick = ()=>{ closeModal("modal-detail"); openCatalogModal(opts.editId); };
     } else if(opts.editTarget==="field"){
       editContextBtn.style.display = "block";
@@ -1293,9 +1291,10 @@
       return;
     }
     const c = modelId ? db.catalog[modelId] : null;
-    document.getElementById("catalogModalTitle").textContent = c ? "Fiyatı Düzenle" : "Fiyat Ekle";
+    const m = modelId ? modelById(modelId) : null;
+    document.getElementById("catalogModalTitle").textContent = m ? modelLabel(m) : (c ? "Fiyatı Düzenle" : "Fiyat Ekle");
     if(modelId) sel.value = modelId;
-    sel.disabled = !!c;
+    sel.disabled = true;
     document.getElementById("catalogTrPrice").value = c ? c.trPrice : "";
     document.getElementById("catalogTrUsed").value = c ? c.trUsed : "";
     document.getElementById("catalogLimitPct").value = c ? c.limitPct : "";
