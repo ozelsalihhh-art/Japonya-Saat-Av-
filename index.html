@@ -302,6 +302,61 @@
   .section-label:first-child{margin-top:0;}
 
   ::-webkit-scrollbar{width:0;height:0;}
+
+  /* ===== Detail modal ===== */
+  .detail-photo{
+    width:100%;aspect-ratio:1.4/1;border-radius:12px;
+    background:var(--card);border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;
+    font-size:40px;color:var(--muted-2);overflow:hidden;margin-bottom:16px;
+    cursor:zoom-in;position:relative;
+  }
+  .detail-photo img{width:100%;height:100%;object-fit:cover;}
+  .detail-photo .zoom-hint{
+    position:absolute;bottom:8px;right:8px;font-size:10px;color:var(--muted);
+    background:rgba(0,0,0,.5);padding:3px 8px;border-radius:20px;
+  }
+  .detail-name{font-family:var(--serif);font-size:22px;font-weight:600;color:var(--text);}
+  .detail-ref{font-size:12px;color:var(--gold-dim);margin-top:3px;}
+  .detail-desc{font-size:13.5px;color:var(--muted);line-height:1.5;margin-top:10px;}
+  .detail-section{margin-top:20px;padding-top:16px;border-top:1px solid var(--line);}
+  .detail-section-label{font-size:11px;letter-spacing:.5px;color:var(--muted-2);margin-bottom:10px;}
+  .detail-figures{display:flex;flex-wrap:wrap;gap:8px;}
+
+  /* ===== Lightbox ===== */
+  .lightbox{
+    position:fixed;inset:0;background:rgba(6,7,9,.92);
+    display:none;align-items:center;justify-content:center;z-index:200;
+    padding:24px;
+  }
+  .lightbox.active{display:flex;}
+  .lightbox img{max-width:100%;max-height:100%;border-radius:8px;object-fit:contain;}
+  .lightbox-close{
+    position:absolute;top:calc(18px + var(--safe-t));right:18px;
+    width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.1);
+    color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;
+    border:1px solid rgba(255,255,255,.2);cursor:pointer;
+  }
+
+  /* ===== Basket picker ===== */
+  .picker-search{
+    background:var(--card);border:1px solid var(--line);border-radius:10px;
+    color:var(--text);padding:10px 13px;font-size:13.5px;width:100%;margin-bottom:6px;
+  }
+  .picker-search::placeholder{color:var(--muted-2);}
+  .picker-list{max-height:44vh;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+  .pick-row{cursor:pointer;}
+  .pick-row .status-dot{
+    width:8px;height:8px;border-radius:50%;flex-shrink:0;background:var(--muted-2);
+  }
+  .pick-row .status-dot.good{background:var(--good);}
+  .pick-row .status-dot.bad{background:var(--bad);}
+  .picker-footer{
+    display:flex;justify-content:space-between;align-items:center;
+    padding:12px 2px 0;font-size:12.5px;color:var(--muted);
+  }
+  .picker-footer b{color:var(--gold-hi);font-weight:600;}
+  .picker-empty{padding:30px 10px;text-align:center;color:var(--muted);font-size:13.5px;}
 </style>
 </head>
 <body>
@@ -584,11 +639,51 @@
       <h3>Sahadan Seç</h3>
       <div class="modal-close" data-close="modal-basketpick">✕</div>
     </div>
-    <div id="basketPickList"></div>
+    <input type="text" class="picker-search" id="basketPickSearch" placeholder="Marka, dükkan veya şehir ara...">
+    <div class="picker-list" id="basketPickList"></div>
+    <div class="picker-footer">
+      <span id="basketPickCount">0 saat seçili</span>
+      <span>Toplam: <b id="basketPickTotal">¥0</b></span>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-primary" id="basketPickSaveBtn">Sepete Ekle</button>
     </div>
   </div>
+</div>
+
+<!-- Model / kayıt detay -->
+<div class="modal-backdrop" id="modal-detail">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>Detay</h3>
+      <div class="modal-close" data-close="modal-detail">✕</div>
+    </div>
+    <div class="detail-photo" id="detailPhoto">📷</div>
+    <div class="detail-name" id="detailName">—</div>
+    <div class="detail-ref" id="detailRef"></div>
+    <div class="detail-desc" id="detailDesc"></div>
+
+    <div class="detail-section" id="detailCatalogSection" style="display:none;">
+      <div class="detail-section-label">FİYAT BİLGİSİ</div>
+      <div class="detail-figures" id="detailCatalogFigures"></div>
+    </div>
+
+    <div class="detail-section" id="detailFieldSection" style="display:none;">
+      <div class="detail-section-label">SAHA KAYDI</div>
+      <div class="detail-figures" id="detailFieldFigures"></div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="detailEditModelBtn">Modeli Düzenle</button>
+      <button class="btn btn-primary" id="detailEditContextBtn" style="display:none;">Kaydı Düzenle</button>
+    </div>
+  </div>
+</div>
+
+<!-- Lightbox -->
+<div class="lightbox" id="lightbox">
+  <div class="lightbox-close" id="lightboxClose">✕</div>
+  <img id="lightboxImg" src="">
 </div>
 
 <script>
@@ -714,7 +809,7 @@
       </div>
     `).join("");
     list.querySelectorAll("[data-open-model]").forEach(el=>{
-      el.addEventListener("click", ()=>openModelModal(el.getAttribute("data-open-model")));
+      el.addEventListener("click", ()=>openDetailModal(el.getAttribute("data-open-model")));
     });
   }
 
@@ -749,7 +844,7 @@
       </div>`;
     }).join("");
     list.querySelectorAll("[data-open-catalog]").forEach(el=>{
-      el.addEventListener("click", ()=>openCatalogModal(el.getAttribute("data-open-catalog")));
+      el.addEventListener("click", ()=>openDetailModal(el.getAttribute("data-open-catalog"), {editTarget:"catalog", editId:el.getAttribute("data-open-catalog")}));
     });
   }
   function bindEmptyCta(container){
@@ -855,7 +950,9 @@
       </div>`;
     }).join("");
     list.querySelectorAll("[data-open-field]").forEach(el=>{
-      el.addEventListener("click", ()=>openFieldModal(el.getAttribute("data-open-field")));
+      const fid = el.getAttribute("data-open-field");
+      const it = db.field.find(f=>f.id===fid);
+      el.addEventListener("click", ()=>openDetailModal(it.modelId, {editTarget:"field", editId:fid}));
     });
   }
 
@@ -890,7 +987,7 @@
       const m = modelById(it.modelId);
       const finalPrice = computeFieldFinal(it);
       return `
-      <div class="basket-item">
+      <div class="basket-item" data-open-basket-item="${it.id}">
         <div class="info">
           <div class="name">${m ? esc(modelLabel(m)) : "Silinmiş model"}</div>
           <div class="shop">${esc(it.shop||"")} · ${esc(it.city||"")}</div>
@@ -900,11 +997,19 @@
       </div>`;
     }).join("");
     list.querySelectorAll("[data-remove-basket]").forEach(el=>{
-      el.addEventListener("click", ()=>{
+      el.addEventListener("click", (e)=>{
+        e.stopPropagation();
         const id = el.getAttribute("data-remove-basket");
         db.basketIds = db.basketIds.filter(x=>x!==id);
         save();
         renderAll();
+      });
+    });
+    list.querySelectorAll("[data-open-basket-item]").forEach(el=>{
+      el.addEventListener("click", ()=>{
+        const fid = el.getAttribute("data-open-basket-item");
+        const it = db.field.find(f=>f.id===fid);
+        if(it) openDetailModal(it.modelId, {editTarget:"field", editId:fid});
       });
     });
   }
@@ -923,33 +1028,180 @@
   });
 
   document.getElementById("addToBasketBtn").addEventListener("click", openBasketPicker);
+  let basketPickChecked = new Set();
+  let basketPickSearchTerm = "";
+
+  function fieldDiffInfo(it){
+    const finalPrice = computeFieldFinal(it);
+    const limit = computeLimit(it.modelId);
+    if(limit===null) return {finalPrice, limit:null, diffPct:null, good:null};
+    const diffPct = ((limit - finalPrice)/limit)*100;
+    return {finalPrice, limit, diffPct, good: finalPrice<=limit};
+  }
+
   function openBasketPicker(){
-    const container = document.getElementById("basketPickList");
-    if(db.field.length===0){
-      container.innerHTML = `<div class="empty"><div class="glyph">🏪</div><div class="msg">Önce "Sahada Bulunanlar" ekranına bir kayıt ekle.</div></div>`;
-    } else {
-      container.innerHTML = db.field.map(it=>{
-        const m = modelById(it.modelId);
-        const checked = db.basketIds.includes(it.id) ? "checked" : "";
-        return `
-        <label class="pick-row">
-          <input type="checkbox" value="${it.id}" ${checked}>
-          <div class="info">
-            <div class="name">${m ? esc(modelLabel(m)) : "Silinmiş model"}</div>
-            <div class="shop">${esc(it.shop||"")} · ${esc(it.city||"")}</div>
-          </div>
-          <div class="price">${fmtYen(computeFieldFinal(it))}</div>
-        </label>`;
-      }).join("");
-    }
+    basketPickChecked = new Set(db.basketIds);
+    basketPickSearchTerm = "";
+    document.getElementById("basketPickSearch").value = "";
+    renderBasketPickList();
     openModal("modal-basketpick");
   }
+
+  document.getElementById("basketPickSearch").addEventListener("input", (e)=>{
+    basketPickSearchTerm = e.target.value.trim().toLowerCase();
+    renderBasketPickList();
+  });
+
+  function renderBasketPickList(){
+    const container = document.getElementById("basketPickList");
+    if(db.field.length===0){
+      container.innerHTML = `<div class="picker-empty">Önce "Sahada Bulunanlar" ekranına bir kayıt ekle.</div>`;
+    } else {
+      let items = db.field.filter(it=>{
+        if(!basketPickSearchTerm) return true;
+        const m = modelById(it.modelId);
+        const hay = ((m?m.brand+" "+m.model:"")+" "+(it.shop||"")+" "+(it.city||"")).toLowerCase();
+        return hay.includes(basketPickSearchTerm);
+      });
+      // en iyi fırsatlar (limit altında, farkı en büyük) önce; limiti olmayanlar en sona
+      items = items.slice().sort((a,b)=>{
+        const da = fieldDiffInfo(a), db_ = fieldDiffInfo(b);
+        if(da.diffPct===null && db_.diffPct===null) return 0;
+        if(da.diffPct===null) return 1;
+        if(db_.diffPct===null) return -1;
+        return db_.diffPct - da.diffPct;
+      });
+      if(items.length===0){
+        container.innerHTML = `<div class="picker-empty">Aramayla eşleşen kayıt yok.</div>`;
+      } else {
+        container.innerHTML = items.map(it=>{
+          const m = modelById(it.modelId);
+          const {finalPrice, diffPct, good} = fieldDiffInfo(it);
+          const dotClass = good===null ? "" : (good ? "good" : "bad");
+          const diffLabel = diffPct===null ? "" : `<span class="pill ${good?'good':'bad'}" style="margin-left:6px;">${good?'-':'+'}${Math.abs(diffPct).toFixed(0)}%</span>`;
+          const checked = basketPickChecked.has(it.id) ? "checked" : "";
+          return `
+          <label class="pick-row" data-pick-row="${it.id}">
+            <input type="checkbox" value="${it.id}" ${checked}>
+            <span class="status-dot ${dotClass}"></span>
+            <div class="info">
+              <div class="name">${m ? esc(modelLabel(m)) : "Silinmiş model"}</div>
+              <div class="shop">${esc(it.shop||"")} · ${esc(it.city||"")}</div>
+            </div>
+            <div class="price">${fmtYen(finalPrice)}${diffLabel}</div>
+          </label>`;
+        }).join("");
+      }
+    }
+    container.querySelectorAll("[data-pick-row]").forEach(row=>{
+      const id = row.getAttribute("data-pick-row");
+      const cb = row.querySelector("input[type=checkbox]");
+      row.addEventListener("click", (e)=>{
+        if(e.target.tagName!=="INPUT"){ cb.checked = !cb.checked; }
+        if(cb.checked) basketPickChecked.add(id); else basketPickChecked.delete(id);
+        updateBasketPickFooter();
+      });
+    });
+    updateBasketPickFooter();
+  }
+
+  function updateBasketPickFooter(){
+    const ids = Array.from(basketPickChecked);
+    const total = ids.reduce((sum,id)=>{
+      const it = db.field.find(f=>f.id===id);
+      return it ? sum + computeFieldFinal(it) : sum;
+    },0);
+    document.getElementById("basketPickCount").textContent = ids.length + " saat seçili";
+    document.getElementById("basketPickTotal").textContent = fmtYen(total);
+  }
+
   document.getElementById("basketPickSaveBtn").addEventListener("click", ()=>{
-    const checked = Array.from(document.querySelectorAll("#basketPickList input[type=checkbox]:checked")).map(c=>c.value);
-    db.basketIds = checked;
+    db.basketIds = Array.from(basketPickChecked);
     save();
     closeModal("modal-basketpick");
     renderAll();
+  });
+
+  /* ============ DETAIL MODAL ============ */
+  let detailEditTarget = null; // {editTarget, editId}
+  function openDetailModal(modelId, opts){
+    opts = opts || {};
+    const m = modelById(modelId);
+    detailEditTarget = opts;
+
+    const photoBox = document.getElementById("detailPhoto");
+    if(m && m.photo){
+      photoBox.innerHTML = `<img src="${m.photo}"><span class="zoom-hint">büyütmek için dokun</span>`;
+      photoBox.onclick = ()=>openLightbox(m.photo);
+    } else {
+      photoBox.innerHTML = "⌚";
+      photoBox.onclick = null;
+    }
+    document.getElementById("detailName").textContent = m ? (m.brand + " " + m.model) : "Silinmiş model";
+    document.getElementById("detailRef").textContent = m && m.ref ? m.ref : "";
+    document.getElementById("detailDesc").textContent = m && m.desc ? m.desc : "";
+
+    const catalogSection = document.getElementById("detailCatalogSection");
+    const c = m ? db.catalog[m.id] : null;
+    if(c){
+      const limit = computeLimit(m.id);
+      document.getElementById("detailCatalogFigures").innerHTML = `
+        <span class="pill">TR: ${fmtTl(c.trPrice)}</span>
+        <span class="pill">2.El: ${fmtTl(c.trUsed)}</span>
+        <span class="pill gold">Alt Limit: ${limit!==null ? fmtYen(limit) : "kur bekleniyor"}</span>`;
+      catalogSection.style.display = "block";
+    } else {
+      catalogSection.style.display = "none";
+    }
+
+    const fieldSection = document.getElementById("detailFieldSection");
+    if(opts.editTarget==="field" && opts.editId){
+      const it = db.field.find(f=>f.id===opts.editId);
+      if(it){
+        const {finalPrice, diffPct, good} = fieldDiffInfo(it);
+        const statusPill = diffPct===null
+          ? `<span class="pill">Limit yok</span>`
+          : `<span class="pill ${good?'good':'bad'}">${good?'Limit altında':'Limit üstünde'} ${diffPct>=0?'+':''}${diffPct.toFixed(0)}%</span>`;
+        document.getElementById("detailFieldFigures").innerHTML = `
+          <span class="pill">${esc(it.shop||"")}</span>
+          <span class="pill">${esc(it.city||"")}</span>
+          <span class="pill gold">${fmtYen(it.price)}</span>
+          <span class="pill">Taxback: %${it.taxback||0}</span>
+          <span class="pill">Net: ${fmtYen(finalPrice)}</span>
+          ${statusPill}`;
+        fieldSection.style.display = "block";
+      } else { fieldSection.style.display = "none"; }
+    } else {
+      fieldSection.style.display = "none";
+    }
+
+    const editContextBtn = document.getElementById("detailEditContextBtn");
+    if(opts.editTarget==="catalog"){
+      editContextBtn.style.display = "block";
+      editContextBtn.textContent = "Fiyatı Düzenle";
+      editContextBtn.onclick = ()=>{ closeModal("modal-detail"); openCatalogModal(opts.editId); };
+    } else if(opts.editTarget==="field"){
+      editContextBtn.style.display = "block";
+      editContextBtn.textContent = "Kaydı Düzenle";
+      editContextBtn.onclick = ()=>{ closeModal("modal-detail"); openFieldModal(opts.editId); };
+    } else {
+      editContextBtn.style.display = "none";
+    }
+
+    document.getElementById("detailEditModelBtn").onclick = ()=>{ closeModal("modal-detail"); openModelModal(modelId); };
+
+    openModal("modal-detail");
+  }
+
+  function openLightbox(src){
+    document.getElementById("lightboxImg").src = src;
+    document.getElementById("lightbox").classList.add("active");
+  }
+  document.getElementById("lightboxClose").addEventListener("click", ()=>{
+    document.getElementById("lightbox").classList.remove("active");
+  });
+  document.getElementById("lightbox").addEventListener("click", (e)=>{
+    if(e.target.id==="lightbox") document.getElementById("lightbox").classList.remove("active");
   });
 
   /* ============ MODEL MODAL ============ */
