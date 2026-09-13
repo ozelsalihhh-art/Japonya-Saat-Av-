@@ -230,13 +230,6 @@
   }
 
   .modal-actions{display:flex;gap:10px;margin-top:20px;}
-  .sync-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;}
-  .sync-status-row{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--text);}
-  .sync-dot{width:9px;height:9px;border-radius:50%;background:var(--muted-2);flex:none;}
-  .sync-dot.ok{background:var(--good);}
-  .sync-dot.err{background:var(--bad);}
-  .sync-dot.busy{background:var(--gold);}
-  .sync-sub{font-size:11.5px;color:var(--muted-2);margin-top:4px;}
   .btn{
     flex:1;padding:13px;border-radius:11px;border:none;font-size:14.5px;font-weight:600;
     cursor:pointer;
@@ -425,11 +418,11 @@
         <div class="chev">›</div>
       </div>
 
-      <div class="dcard gold-edge" data-nav="settings">
-        <div class="icon">🔄</div>
+      <div class="dcard gold-edge" id="exportCard">
+        <div class="icon">📤</div>
         <div class="body">
-          <div class="title">Senkronizasyon</div>
-          <div class="meta" id="dashSyncMeta">Bağlı değil</div>
+          <div class="title">Dışa Aktar</div>
+          <div class="meta">Excel olarak paylaş / mail at</div>
         </div>
         <div class="chev">›</div>
       </div>
@@ -529,39 +522,6 @@
 
     <div class="section-label">SEPETİNDEKİLER</div>
     <div class="list" id="basketList"></div>
-  </section>
-
-  <!-- ================= SETTINGS / SYNC ================= -->
-  <section class="view" id="view-settings">
-    <div class="view-header">
-      <div class="back-btn" data-nav="dashboard">‹</div>
-      <div>
-        <div class="view-title">Senkronizasyon</div>
-        <div class="view-sub">Google Sheets ile bilgisayardan da düzenle</div>
-      </div>
-    </div>
-
-    <div class="field">
-      <label>Apps Script Web App URL</label>
-      <input type="text" id="syncUrlInput" placeholder="https://script.google.com/macros/s/.../exec">
-      <div class="hint">Kurulum rehberindeki Web App URL'sini buraya yapıştır.</div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-secondary" id="syncUrlSaveBtn">Bağlantıyı Kaydet</button>
-    </div>
-
-    <div class="sync-card" style="margin-top:18px;">
-      <div class="sync-status-row"><span class="sync-dot" id="syncDot"></span><span id="syncStatusText">Bağlı değil</span></div>
-      <div class="sync-sub" id="syncStatusSub">Yukarıya Web App URL'sini girip kaydet.</div>
-      <div class="modal-actions">
-        <button class="btn btn-secondary" id="syncPullBtn">Sheets'ten Çek</button>
-        <button class="btn btn-primary" id="syncPushBtn">Sheets'e Gönder</button>
-      </div>
-    </div>
-
-    <div class="hint" style="margin-top:14px;">
-      Not: Fotoğraflar senkronize edilmez, sadece bu cihazda saklı kalır. Marka/model, fiyat kataloğu, saha kayıtları, kur ve bütçe senkronize edilir.
-    </div>
   </section>
 
 </div>
@@ -758,6 +718,7 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
   <img id="lightboxImg" src="">
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 (function(){
   "use strict";
@@ -779,190 +740,8 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     };
   }
   let db = loadStore();
-  function persistLocal(){ localStorage.setItem(STORE_KEY, JSON.stringify(db)); }
-  function save(){ persistLocal(); scheduleSyncPush(); }
+  function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(db)); }
   function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
-
-  /* ============ GOOGLE SHEETS SYNC ============ */
-  const SYNC_URL_KEY = "jpwatch_sync_url";
-  let syncUrl = localStorage.getItem(SYNC_URL_KEY) || "";
-  let syncTimer = null;
-  let syncState = { status: "idle", lastSync: null, error: null }; // idle | busy | ok | err
-
-  function setSyncState(status, error){
-    syncState.status = status;
-    if(status==="ok") syncState.lastSync = Date.now();
-    syncState.error = error || null;
-    renderSyncStatus();
-  }
-
-  function scheduleSyncPush(){
-    if(!syncUrl) return;
-    if(syncTimer) clearTimeout(syncTimer);
-    syncTimer = setTimeout(pushToSheet, 1200);
-  }
-
-  /* JSONP GET — script tag'leri CORS kısıtlamasına tabi değildir, bu yüzden
-     Safari'nin Apps Script yönlendirmelerinde verdiği "Load failed" hatasını
-     tamamen atlatır. */
-  function jsonpRequest_(url){
-    return new Promise((resolve, reject)=>{
-      const cbName = "jpwatch_cb_" + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
-      let done = false;
-      const script = document.createElement("script");
-      const cleanup = ()=>{
-        try{ delete window[cbName]; }catch(e){ window[cbName] = undefined; }
-        if(script.parentNode) script.parentNode.removeChild(script);
-        clearTimeout(timeoutId);
-      };
-      const timeoutId = setTimeout(()=>{
-        if(!done){ done = true; cleanup(); reject(new Error("Zaman aşımı — Sheets'e ulaşılamadı.")); }
-      }, 15000);
-      window[cbName] = (data)=>{
-        if(done) return;
-        done = true;
-        cleanup();
-        resolve(data);
-      };
-      script.onerror = ()=>{
-        if(done) return;
-        done = true;
-        cleanup();
-        reject(new Error("Sheets'e bağlanılamadı (script yüklenemedi)."));
-      };
-      const sep = url.indexOf("?")>-1 ? "&" : "?";
-      script.src = url + sep + "callback=" + encodeURIComponent(cbName) + "&_t=" + Date.now();
-      document.body.appendChild(script);
-    });
-  }
-
-  /* Gizli iframe'e form POST — bu da fetch/XHR olmadığı için CORS'a tabi
-     değildir. Cevabı okuyamayız (buna ihtiyacımız da yok), gönderim başarılıysa
-     resolve ederiz. */
-  function formPostRequest_(url, payloadObj){
-    return new Promise((resolve)=>{
-      const frameId = "jpwatch_sync_frame";
-      let iframe = document.getElementById(frameId);
-      if(!iframe){
-        iframe = document.createElement("iframe");
-        iframe.id = frameId;
-        iframe.name = frameId;
-        iframe.style.display = "none";
-        document.body.appendChild(iframe);
-      }
-      const form = document.createElement("form");
-      form.method = "POST";
-      form.action = url;
-      form.target = frameId;
-      form.style.display = "none";
-      const input = document.createElement("input");
-      input.type = "hidden";
-      input.name = "payload";
-      input.value = JSON.stringify(payloadObj);
-      form.appendChild(input);
-      document.body.appendChild(form);
-      form.submit();
-      setTimeout(()=>{
-        if(form.parentNode) form.parentNode.removeChild(form);
-        resolve(true);
-      }, 1200);
-    });
-  }
-
-  function buildSyncPayload(){
-    return {
-      models: db.models.map(m=>({ id:m.id, brand:m.brand, model:m.model, ref:m.ref||"", desc:m.desc||"" })),
-      catalog: db.catalog,
-      field: db.field,
-      fx: db.fx,
-      budget: db.budget,
-      basketIds: db.basketIds
-    };
-  }
-
-  async function pushToSheet(){
-    if(!syncUrl) return;
-    setSyncState("busy");
-    try{
-      await formPostRequest_(syncUrl, buildSyncPayload());
-      setSyncState("ok");
-    }catch(err){
-      setSyncState("err", err.message || String(err));
-    }
-  }
-
-  function isRemoteEmpty_(data){
-    return (!data.models || data.models.length===0)
-      && (!data.field || data.field.length===0)
-      && (!data.catalog || Object.keys(data.catalog).length===0);
-  }
-  function hasLocalData_(){
-    return db.models.length>0 || db.field.length>0 || Object.keys(db.catalog).length>0;
-  }
-  function applyRemoteData_(data){
-    // Preserve locally-stored photos by matching model id
-    const photoById = {};
-    db.models.forEach(m=>{ if(m.photo) photoById[m.id] = m.photo; });
-
-    db.models = (data.models||[]).map(m=>({ ...m, photo: photoById[m.id] || null }));
-    db.catalog = data.catalog || {};
-    db.field = data.field || [];
-    db.fx = data.fx || db.fx;
-    db.budget = (data.budget!==undefined && data.budget!==null && data.budget!=="") ? data.budget : db.budget;
-    db.basketIds = data.basketIds || [];
-  }
-
-  async function pullFromSheet(showBusy){
-    if(!syncUrl) return;
-    if(showBusy) setSyncState("busy");
-    try{
-      const data = await jsonpRequest_(syncUrl);
-      if(!data.ok) throw new Error(data.error || "Bilinmeyen hata");
-
-      // GÜVENLİK KİLİDİ: Sheet boş ama telefonda veri varsa, ASLA üzerine
-      // yazma — bunun yerine telefondaki veriyi Sheet'e gönder (seed).
-      if(isRemoteEmpty_(data) && hasLocalData_()){
-        await pushToSheet();
-        return;
-      }
-
-      applyRemoteData_(data);
-      persistLocal();
-      setSyncState("ok");
-      renderAll();
-    }catch(err){
-      setSyncState("err", err.message || String(err));
-    }
-  }
-
-  function renderSyncStatus(){
-    const dot = document.getElementById("syncDot");
-    const text = document.getElementById("syncStatusText");
-    const sub = document.getElementById("syncStatusSub");
-    const dashMeta = document.getElementById("dashSyncMeta");
-    if(!dot) return; // view not yet in DOM on very first call, guard anyway
-    if(!syncUrl){
-      dot.className = "sync-dot";
-      text.textContent = "Bağlı değil";
-      sub.textContent = "Yukarıya Web App URL'sini girip kaydet.";
-      if(dashMeta) dashMeta.textContent = "Bağlı değil";
-      return;
-    }
-    if(syncState.status==="busy"){
-      dot.className = "sync-dot busy";
-      text.textContent = "Senkronize ediliyor...";
-      sub.textContent = "";
-    }else if(syncState.status==="err"){
-      dot.className = "sync-dot err";
-      text.textContent = "Hata";
-      sub.textContent = syncState.error || "";
-    }else{
-      dot.className = "sync-dot ok";
-      text.textContent = "Bağlı";
-      sub.textContent = syncState.lastSync ? ("Son senkron: " + new Date(syncState.lastSync).toLocaleTimeString("tr-TR")) : "Henüz senkronize edilmedi.";
-    }
-    if(dashMeta) dashMeta.textContent = syncState.status==="err" ? "Hata" : (syncState.status==="ok" ? "Bağlı" : "Bekliyor");
-  }
 
   /* ============ NAV ============ */
   const views = document.querySelectorAll(".view");
@@ -1636,7 +1415,6 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     if(currentView==="fx") renderFx();
     if(currentView==="field") renderField();
     if(currentView==="basket") renderBasket();
-    if(currentView==="settings") renderSyncStatus();
   }
 
   /* ============ BULK ADD MODELS ============ */
@@ -1665,26 +1443,74 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     alert(added + " model eklendi" + (skipped>0 ? (", " + skipped + " satır atlandı (marka/model eksik).") : "."));
   });
 
-  /* ============ SETTINGS / SYNC WIRING ============ */
-  document.getElementById("syncUrlInput").value = syncUrl;
-  document.getElementById("syncUrlSaveBtn").addEventListener("click", ()=>{
-    const v = document.getElementById("syncUrlInput").value.trim();
-    syncUrl = v;
-    localStorage.setItem(SYNC_URL_KEY, v);
-    setSyncState("idle");
-    if(syncUrl) pullFromSheet(true);
-  });
-  document.getElementById("syncPullBtn").addEventListener("click", ()=>{
-    if(!syncUrl){ alert("Önce Web App URL'sini kaydet."); return; }
-    pullFromSheet(true);
-  });
-  document.getElementById("syncPushBtn").addEventListener("click", ()=>{
-    if(!syncUrl){ alert("Önce Web App URL'sini kaydet."); return; }
-    pushToSheet();
-  });
+  /* ============ EXCEL DIŞA AKTARMA ============ */
+  function buildWorkbook(){
+    const wb = XLSX.utils.book_new();
+
+    const modelsAOA = [["Marka","Model","Referans","Açıklama"]];
+    db.models.forEach(m=>modelsAOA.push([m.brand||"", m.model||"", m.ref||"", m.desc||""]));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(modelsAOA), "Modeller");
+
+    const catalogAOA = [["Marka / Model","TR Fiyatı (₺)","TR 2.El Fiyatı (₺)","Alt Limit (%)"]];
+    Object.keys(db.catalog).forEach(id=>{
+      const m = modelById(id);
+      const c = db.catalog[id];
+      catalogAOA.push([m ? modelLabel(m) : id, c.trPrice||"", c.trUsed||"", c.limitPct||""]);
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(catalogAOA), "Katalog");
+
+    const fieldAOA = [["Marka / Model","Dükkan","Şehir","Fiyat (¥)","Taxback (%)"]];
+    db.field.forEach(f=>{
+      const m = modelById(f.modelId);
+      fieldAOA.push([m ? modelLabel(m) : (f.modelId||""), f.shop||"", f.city||"", f.price||"", f.taxback||""]);
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(fieldAOA), "Saha Kayıtları");
+
+    const genelAOA = [
+      ["Alan","Değer"],
+      ["Kur (1 ₺ = ? ¥)", db.fx.rate || ""],
+      ["Kur Güncellemesi", db.fx.updated ? new Date(db.fx.updated).toLocaleString("tr-TR") : ""],
+      ["Bütçe (¥)", db.budget || ""],
+      ["Sepetteki Saat Sayısı", db.basketIds.length],
+      ["Dışa Aktarım Tarihi", new Date().toLocaleString("tr-TR")]
+    ];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(genelAOA), "Genel");
+
+    return wb;
+  }
+
+  function exportData(){
+    if(db.models.length===0){ alert("Henüz kayıtlı model yok."); return; }
+    const wb = buildWorkbook();
+    const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array" });
+    const blob = new Blob([wbout], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+    const filename = "japonya-saat-avi-" + new Date().toISOString().slice(0,10) + ".xlsx";
+    const file = new File([blob], filename, { type: blob.type });
+
+    if(navigator.canShare && navigator.canShare({ files: [file] })){
+      navigator.share({ files: [file], title: "Japonya Saat Avı Verileri" }).catch(()=>{
+        downloadBlob(blob, filename);
+      });
+    } else {
+      downloadBlob(blob, filename);
+    }
+  }
+
+  function downloadBlob(blob, filename){
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url), 2000);
+    alert("Dosya indirildi. Mail veya diğer uygulamalardan ek olarak seçip gönderebilirsin.");
+  }
+
+  document.getElementById("exportCard").addEventListener("click", exportData);
 
   renderAll();
-  if(syncUrl) pullFromSheet(true); // uygulama açılışında Sheets'teki en güncel veriyi çek
 })();
 </script>
 </body>
