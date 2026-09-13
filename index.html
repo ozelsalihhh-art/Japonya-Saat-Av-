@@ -462,9 +462,10 @@
       <div class="back-btn" data-nav="dashboard">‹</div>
       <div>
         <div class="view-title">Kur</div>
-        <div class="view-sub">TL → Yen çevrim oranı</div>
+        <div class="view-sub">TL ve USD → Yen çevrim oranları</div>
       </div>
     </div>
+    <div class="section-label">TL → YEN</div>
     <div class="fx-hero">
       <div class="rate" id="fxRateBig">—</div>
       <div class="rate-label">1 ₺ = ? ¥</div>
@@ -473,6 +474,17 @@
     <div class="fx-actions">
       <button class="btn btn-secondary" id="fxLiveBtn">Canlı Kuru Çek</button>
       <button class="btn btn-primary" id="fxManualBtn">Elle Gir</button>
+    </div>
+
+    <div class="section-label" style="margin-top:20px;">USD → YEN</div>
+    <div class="fx-hero">
+      <div class="rate" id="fxUsdRateBig">—</div>
+      <div class="rate-label">1 $ = ? ¥</div>
+      <div class="updated" id="fxUsdUpdated">Henüz güncellenmedi</div>
+    </div>
+    <div class="fx-actions">
+      <button class="btn btn-secondary" id="fxLiveUsdBtn">Canlı Kuru Çek</button>
+      <button class="btn btn-primary" id="fxManualUsdBtn">Elle Gir</button>
     </div>
   </section>
 
@@ -597,6 +609,11 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
       <input type="number" id="catalogLimitPct" placeholder="55">
       <div class="hint">Alt limit = TR Fiyatı (¥'ye çevrilmiş) × bu yüzde</div>
     </div>
+    <div class="field">
+      <label>WatchCharts Piyasa Değeri (USD)</label>
+      <input type="number" id="catalogWcUsd" placeholder="0">
+      <div class="hint">watchcharts.com'daki güncel ikinci el piyasa değeri — otomatik ¥'ye çevrilip referans olarak gösterilir</div>
+    </div>
     <div class="modal-actions">
       <button class="btn btn-danger" id="catalogDeleteBtn" style="display:none;">Sil</button>
       <button class="btn btn-primary" id="catalogSaveBtn">Kaydet</button>
@@ -608,11 +625,11 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
 <div class="modal-backdrop" id="modal-fx">
   <div class="modal">
     <div class="modal-head">
-      <h3>Kuru Elle Gir</h3>
+      <h3 id="fxModalTitle">Kuru Elle Gir</h3>
       <div class="modal-close" data-close="modal-fx">✕</div>
     </div>
     <div class="field">
-      <label>1 ₺ = ? ¥</label>
+      <label id="fxModalLabel">1 ₺ = ? ¥</label>
       <input type="number" step="0.01" id="fxManualInput" placeholder="30.00">
     </div>
     <div class="modal-actions">
@@ -732,14 +749,16 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     }catch(e){}
     return {
       models: [],
-      catalog: {},   // modelId -> {trPrice, trUsed, limitPct}
+      catalog: {},   // modelId -> {trPrice, trUsed, limitPct, wcUsd}
       field: [],     // {id, modelId, shop, city, price, taxback}
-      fx: {rate: null, updated: null, manual: false},
+      fx: {rate: null, updated: null, manual: false},        // TL -> YEN
+      fxUsd: {rate: null, updated: null, manual: false},      // USD -> YEN
       budget: 1300000,
       basketIds: []  // field item ids
     };
   }
   let db = loadStore();
+  if(!db.fxUsd) db.fxUsd = {rate: null, updated: null, manual: false}; // eski kayıtlar için göç
   function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(db)); }
   function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
 
@@ -790,6 +809,11 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     if(!r || !tl) return null;
     return tl * r;
   }
+  function usdToYen(usd){
+    const r = db.fxUsd.rate;
+    if(!r || !usd) return null;
+    return usd * r;
+  }
 
   function modelById(id){ return db.models.find(m=>m.id===id); }
   function modelLabel(m){
@@ -804,6 +828,11 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     if(yen===null) return null;
     return yen * (c.limitPct/100);
   }
+  function computeWcYen(modelId){
+    const c = db.catalog[modelId];
+    if(!c || !c.wcUsd) return null;
+    return usdToYen(c.wcUsd);
+  }
   function computeFieldFinal(item){
     const tb = (item.taxback||0)/100;
     return item.price - (item.price*tb);
@@ -814,7 +843,7 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     document.getElementById("dashModelsMeta").textContent = db.models.length + " model kayıtlı";
     document.getElementById("dashCatalogMeta").textContent = Object.keys(db.catalog).length + " model fiyatlandı";
     document.getElementById("dashFieldMeta").textContent = db.field.length + " kayıt";
-    document.getElementById("dashFxMeta").textContent = db.fx.rate ? ("1 ₺ = " + db.fx.rate.toFixed(2) + " ¥") : "Henüz güncellenmedi";
+    document.getElementById("dashFxMeta").textContent = db.fx.rate ? ("1 ₺ = " + db.fx.rate.toFixed(2) + " ¥" + (db.fxUsd.rate ? " · 1 $ = " + db.fxUsd.rate.toFixed(2) + " ¥" : "")) : "Henüz güncellenmedi";
     document.getElementById("dashBasketMeta").textContent = db.basketIds.length ? (db.basketIds.length + " saat sepette") : "Sepet boş";
 
     document.getElementById("topFx").textContent = db.fx.rate ? db.fx.rate.toFixed(2) : "—";
@@ -860,10 +889,12 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     list.innerHTML = db.models.map(m=>{
       const c = db.catalog[m.id];
       const limit = c ? computeLimit(m.id) : null;
+      const wcYen = c ? computeWcYen(m.id) : null;
       const figures = c
         ? `<span class="pill">TR: ${fmtTl(c.trPrice)}</span>
            <span class="pill">2.El: ${fmtTl(c.trUsed)}</span>
-           <span class="pill gold">Alt Limit: ${limit!==null ? fmtYen(limit) : "kur bekleniyor"}</span>`
+           <span class="pill gold">Alt Limit: ${limit!==null ? fmtYen(limit) : "kur bekleniyor"}</span>
+           ${c.wcUsd ? `<span class="pill">WC: $${Math.round(c.wcUsd).toLocaleString("tr-TR")}${wcYen!==null ? " ≈ "+fmtYen(wcYen) : ""}</span>` : ""}`
         : `<span class="pill gold">Fiyat girilmedi — dokun</span>`;
       return `
       <div class="item" data-open-catalog="${m.id}">
@@ -893,20 +924,25 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     document.getElementById("fxUpdated").textContent = db.fx.updated
       ? ("Son güncelleme: " + new Date(db.fx.updated).toLocaleString("tr-TR") + (db.fx.manual ? " (elle)" : " (canlı)"))
       : "Henüz güncellenmedi";
+
+    document.getElementById("fxUsdRateBig").textContent = db.fxUsd.rate ? db.fxUsd.rate.toFixed(2)+" ¥" : "—";
+    document.getElementById("fxUsdUpdated").textContent = db.fxUsd.updated
+      ? ("Son güncelleme: " + new Date(db.fxUsd.updated).toLocaleString("tr-TR") + (db.fxUsd.manual ? " (elle)" : " (canlı)"))
+      : "Henüz güncellenmedi";
   }
 
-  async function fetchLiveFx(){
-    const btn = document.getElementById("fxLiveBtn");
+  async function fetchLiveFxFor_(currencyCode, target, btnId){
+    const btn = document.getElementById(btnId);
     const orig = btn.textContent;
     btn.textContent = "Çekiliyor...";
     btn.disabled = true;
     try{
-      const res = await fetch("https://open.er-api.com/v6/latest/TRY");
+      const res = await fetch("https://open.er-api.com/v6/latest/" + currencyCode);
       const data = await res.json();
       if(data && data.rates && data.rates.JPY){
-        db.fx.rate = data.rates.JPY;
-        db.fx.updated = Date.now();
-        db.fx.manual = false;
+        target.rate = data.rates.JPY;
+        target.updated = Date.now();
+        target.manual = false;
         save();
         renderAll();
       } else {
@@ -918,17 +954,34 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     btn.textContent = orig;
     btn.disabled = false;
   }
+  function fetchLiveFx(){ return fetchLiveFxFor_("TRY", db.fx, "fxLiveBtn"); }
+  function fetchLiveFxUsd(){ return fetchLiveFxFor_("USD", db.fxUsd, "fxLiveUsdBtn"); }
+
   document.getElementById("fxLiveBtn").addEventListener("click", fetchLiveFx);
+  document.getElementById("fxLiveUsdBtn").addEventListener("click", fetchLiveFxUsd);
+
+  let fxManualTarget = "try"; // "try" | "usd"
   document.getElementById("fxManualBtn").addEventListener("click", ()=>{
+    fxManualTarget = "try";
+    document.getElementById("fxModalTitle").textContent = "TL Kurunu Elle Gir";
+    document.getElementById("fxModalLabel").textContent = "1 ₺ = ? ¥";
     document.getElementById("fxManualInput").value = db.fx.rate || "";
+    openModal("modal-fx");
+  });
+  document.getElementById("fxManualUsdBtn").addEventListener("click", ()=>{
+    fxManualTarget = "usd";
+    document.getElementById("fxModalTitle").textContent = "USD Kurunu Elle Gir";
+    document.getElementById("fxModalLabel").textContent = "1 $ = ? ¥";
+    document.getElementById("fxManualInput").value = db.fxUsd.rate || "";
     openModal("modal-fx");
   });
   document.getElementById("fxManualSaveBtn").addEventListener("click", ()=>{
     const v = parseFloat(document.getElementById("fxManualInput").value);
     if(!v || v<=0){ alert("Geçerli bir kur değeri gir."); return; }
-    db.fx.rate = v;
-    db.fx.updated = Date.now();
-    db.fx.manual = true;
+    const target = fxManualTarget==="usd" ? db.fxUsd : db.fx;
+    target.rate = v;
+    target.updated = Date.now();
+    target.manual = true;
     save();
     closeModal("modal-fx");
     renderAll();
@@ -1176,10 +1229,12 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     const c = m ? db.catalog[m.id] : null;
     if(c){
       const limit = computeLimit(m.id);
+      const wcYen = computeWcYen(m.id);
       document.getElementById("detailCatalogFigures").innerHTML = `
         <span class="pill">TR: ${fmtTl(c.trPrice)}</span>
         <span class="pill">2.El: ${fmtTl(c.trUsed)}</span>
-        <span class="pill gold">Alt Limit: ${limit!==null ? fmtYen(limit) : "kur bekleniyor"}</span>`;
+        <span class="pill gold">Alt Limit: ${limit!==null ? fmtYen(limit) : "kur bekleniyor"}</span>
+        ${c.wcUsd ? `<span class="pill">WatchCharts: $${Math.round(c.wcUsd).toLocaleString("tr-TR")}${wcYen!==null ? " ≈ "+fmtYen(wcYen) : ""}</span>` : ""}`;
       catalogSection.style.display = "block";
     } else {
       catalogSection.style.display = "none";
@@ -1331,6 +1386,7 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     document.getElementById("catalogTrPrice").value = c ? c.trPrice : "";
     document.getElementById("catalogTrUsed").value = c ? c.trUsed : "";
     document.getElementById("catalogLimitPct").value = c ? c.limitPct : "";
+    document.getElementById("catalogWcUsd").value = c && c.wcUsd ? c.wcUsd : "";
     document.getElementById("catalogDeleteBtn").style.display = c ? "block" : "none";
     openModal("modal-catalog");
   }
@@ -1340,7 +1396,8 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     const trPrice = parseFloat(document.getElementById("catalogTrPrice").value) || 0;
     const trUsed = parseFloat(document.getElementById("catalogTrUsed").value) || 0;
     const limitPct = parseFloat(document.getElementById("catalogLimitPct").value) || 0;
-    db.catalog[modelId] = {trPrice, trUsed, limitPct};
+    const wcUsd = parseFloat(document.getElementById("catalogWcUsd").value) || 0;
+    db.catalog[modelId] = {trPrice, trUsed, limitPct, wcUsd};
     save();
     closeModal("modal-catalog");
     renderAll();
@@ -1451,11 +1508,12 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     db.models.forEach(m=>modelsAOA.push([m.brand||"", m.model||"", m.ref||"", m.desc||""]));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(modelsAOA), "Modeller");
 
-    const catalogAOA = [["Marka / Model","TR Fiyatı (₺)","TR 2.El Fiyatı (₺)","Alt Limit (%)"]];
+    const catalogAOA = [["Marka / Model","TR Fiyatı (₺)","TR 2.El Fiyatı (₺)","Alt Limit (%)","WatchCharts (USD)","WatchCharts (≈¥)"]];
     Object.keys(db.catalog).forEach(id=>{
       const m = modelById(id);
       const c = db.catalog[id];
-      catalogAOA.push([m ? modelLabel(m) : id, c.trPrice||"", c.trUsed||"", c.limitPct||""]);
+      const wcYen = computeWcYen(id);
+      catalogAOA.push([m ? modelLabel(m) : id, c.trPrice||"", c.trUsed||"", c.limitPct||"", c.wcUsd||"", wcYen!==null ? Math.round(wcYen) : ""]);
     });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(catalogAOA), "Katalog");
 
@@ -1469,7 +1527,9 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     const genelAOA = [
       ["Alan","Değer"],
       ["Kur (1 ₺ = ? ¥)", db.fx.rate || ""],
-      ["Kur Güncellemesi", db.fx.updated ? new Date(db.fx.updated).toLocaleString("tr-TR") : ""],
+      ["Kur Güncellemesi (TL)", db.fx.updated ? new Date(db.fx.updated).toLocaleString("tr-TR") : ""],
+      ["Kur (1 $ = ? ¥)", db.fxUsd.rate || ""],
+      ["Kur Güncellemesi (USD)", db.fxUsd.updated ? new Date(db.fxUsd.updated).toLocaleString("tr-TR") : ""],
       ["Bütçe (¥)", db.budget || ""],
       ["Sepetteki Saat Sayısı", db.basketIds.length],
       ["Dışa Aktarım Tarihi", new Date().toLocaleString("tr-TR")]
