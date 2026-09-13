@@ -802,6 +802,73 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     syncTimer = setTimeout(pushToSheet, 1200);
   }
 
+  /* JSONP GET — script tag'leri CORS kısıtlamasına tabi değildir, bu yüzden
+     Safari'nin Apps Script yönlendirmelerinde verdiği "Load failed" hatasını
+     tamamen atlatır. */
+  function jsonpRequest_(url){
+    return new Promise((resolve, reject)=>{
+      const cbName = "jpwatch_cb_" + Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+      let done = false;
+      const script = document.createElement("script");
+      const cleanup = ()=>{
+        try{ delete window[cbName]; }catch(e){ window[cbName] = undefined; }
+        if(script.parentNode) script.parentNode.removeChild(script);
+        clearTimeout(timeoutId);
+      };
+      const timeoutId = setTimeout(()=>{
+        if(!done){ done = true; cleanup(); reject(new Error("Zaman aşımı — Sheets'e ulaşılamadı.")); }
+      }, 15000);
+      window[cbName] = (data)=>{
+        if(done) return;
+        done = true;
+        cleanup();
+        resolve(data);
+      };
+      script.onerror = ()=>{
+        if(done) return;
+        done = true;
+        cleanup();
+        reject(new Error("Sheets'e bağlanılamadı (script yüklenemedi)."));
+      };
+      const sep = url.indexOf("?")>-1 ? "&" : "?";
+      script.src = url + sep + "callback=" + encodeURIComponent(cbName) + "&_t=" + Date.now();
+      document.body.appendChild(script);
+    });
+  }
+
+  /* Gizli iframe'e form POST — bu da fetch/XHR olmadığı için CORS'a tabi
+     değildir. Cevabı okuyamayız (buna ihtiyacımız da yok), gönderim başarılıysa
+     resolve ederiz. */
+  function formPostRequest_(url, payloadObj){
+    return new Promise((resolve)=>{
+      const frameId = "jpwatch_sync_frame";
+      let iframe = document.getElementById(frameId);
+      if(!iframe){
+        iframe = document.createElement("iframe");
+        iframe.id = frameId;
+        iframe.name = frameId;
+        iframe.style.display = "none";
+        document.body.appendChild(iframe);
+      }
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = url;
+      form.target = frameId;
+      form.style.display = "none";
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "payload";
+      input.value = JSON.stringify(payloadObj);
+      form.appendChild(input);
+      document.body.appendChild(form);
+      form.submit();
+      setTimeout(()=>{
+        if(form.parentNode) form.parentNode.removeChild(form);
+        resolve(true);
+      }, 1200);
+    });
+  }
+
   function buildSyncPayload(){
     return {
       models: db.models.map(m=>({ id:m.id, brand:m.brand, model:m.model, ref:m.ref||"", desc:m.desc||"" })),
@@ -817,13 +884,7 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     if(!syncUrl) return;
     setSyncState("busy");
     try{
-      const res = await fetch(syncUrl, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids CORS preflight against Apps Script
-        body: JSON.stringify(buildSyncPayload())
-      });
-      const data = await res.json();
-      if(!data.ok) throw new Error(data.error || "Bilinmeyen hata");
+      await formPostRequest_(syncUrl, buildSyncPayload());
       setSyncState("ok");
     }catch(err){
       setSyncState("err", err.message || String(err));
@@ -855,8 +916,7 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     if(!syncUrl) return;
     if(showBusy) setSyncState("busy");
     try{
-      const res = await fetch(syncUrl, { method: "GET" });
-      const data = await res.json();
+      const data = await jsonpRequest_(syncUrl);
       if(!data.ok) throw new Error(data.error || "Bilinmeyen hata");
 
       // GÜVENLİK KİLİDİ: Sheet boş ama telefonda veri varsa, ASLA üzerine
