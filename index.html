@@ -230,6 +230,13 @@
   }
 
   .modal-actions{display:flex;gap:10px;margin-top:20px;}
+  .sync-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;}
+  .sync-status-row{display:flex;align-items:center;gap:8px;font-size:13.5px;color:var(--text);}
+  .sync-dot{width:9px;height:9px;border-radius:50%;background:var(--muted-2);flex:none;}
+  .sync-dot.ok{background:var(--good);}
+  .sync-dot.err{background:var(--bad);}
+  .sync-dot.busy{background:var(--gold);}
+  .sync-sub{font-size:11.5px;color:var(--muted-2);margin-top:4px;}
   .btn{
     flex:1;padding:13px;border-radius:11px;border:none;font-size:14.5px;font-weight:600;
     cursor:pointer;
@@ -417,6 +424,15 @@
         </div>
         <div class="chev">›</div>
       </div>
+
+      <div class="dcard gold-edge" data-nav="settings">
+        <div class="icon">🔄</div>
+        <div class="body">
+          <div class="title">Senkronizasyon</div>
+          <div class="meta" id="dashSyncMeta">Bağlı değil</div>
+        </div>
+        <div class="chev">›</div>
+      </div>
     </div>
   </section>
 
@@ -428,6 +444,9 @@
         <div class="view-title">Model Vitrini</div>
         <div class="view-sub">Radarındaki tüm saatler — her yeni saat önce buraya girilir</div>
       </div>
+    </div>
+    <div class="modal-actions" style="margin-top:0;margin-bottom:14px;">
+      <button class="btn btn-secondary" id="bulkAddOpenBtn" style="flex:1;">📋 Toplu Ekle (yapıştır)</button>
     </div>
     <div class="list" id="modelsList"></div>
   </section>
@@ -512,6 +531,39 @@
     <div class="list" id="basketList"></div>
   </section>
 
+  <!-- ================= SETTINGS / SYNC ================= -->
+  <section class="view" id="view-settings">
+    <div class="view-header">
+      <div class="back-btn" data-nav="dashboard">‹</div>
+      <div>
+        <div class="view-title">Senkronizasyon</div>
+        <div class="view-sub">Google Sheets ile bilgisayardan da düzenle</div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Apps Script Web App URL</label>
+      <input type="text" id="syncUrlInput" placeholder="https://script.google.com/macros/s/.../exec">
+      <div class="hint">Kurulum rehberindeki Web App URL'sini buraya yapıştır.</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" id="syncUrlSaveBtn">Bağlantıyı Kaydet</button>
+    </div>
+
+    <div class="sync-card" style="margin-top:18px;">
+      <div class="sync-status-row"><span class="sync-dot" id="syncDot"></span><span id="syncStatusText">Bağlı değil</span></div>
+      <div class="sync-sub" id="syncStatusSub">Yukarıya Web App URL'sini girip kaydet.</div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="syncPullBtn">Sheets'ten Çek</button>
+        <button class="btn btn-primary" id="syncPushBtn">Sheets'e Gönder</button>
+      </div>
+    </div>
+
+    <div class="hint" style="margin-top:14px;">
+      Not: Fotoğraflar senkronize edilmez, sadece bu cihazda saklı kalır. Marka/model, fiyat kataloğu, saha kayıtları, kur ve bütçe senkronize edilir.
+    </div>
+  </section>
+
 </div>
 
 <!-- FAB -->
@@ -541,6 +593,26 @@
     <div class="modal-actions">
       <button class="btn btn-danger" id="modelDeleteBtn" style="display:none;">Sil</button>
       <button class="btn btn-primary" id="modelSaveBtn">Kaydet</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bulk add models -->
+<div class="modal-backdrop" id="modal-bulk">
+  <div class="modal">
+    <div class="modal-head">
+      <h3>Toplu Model Ekle</h3>
+      <div class="modal-close" data-close="modal-bulk">✕</div>
+    </div>
+    <div class="field">
+      <label>Her satıra bir saat — parçaları | (dik çizgi) ile ayır</label>
+      <textarea id="bulkAddText" rows="10" placeholder="Omega | Constellation | 131.20.29.20.03.001 | Deri kayışlı
+Seiko | Presage | SPB215
+Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
+      <div class="hint">Sıra: Marka | Model | Referans (opsiyonel) | Açıklama (opsiyonel). Marka ve Model zorunlu, diğerleri boş bırakılabilir.</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="bulkAddSaveBtn">Hepsini Ekle</button>
     </div>
   </div>
 </div>
@@ -707,8 +779,130 @@
     };
   }
   let db = loadStore();
-  function save(){ localStorage.setItem(STORE_KEY, JSON.stringify(db)); }
+  function persistLocal(){ localStorage.setItem(STORE_KEY, JSON.stringify(db)); }
+  function save(){ persistLocal(); scheduleSyncPush(); }
   function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+
+  /* ============ GOOGLE SHEETS SYNC ============ */
+  const SYNC_URL_KEY = "jpwatch_sync_url";
+  let syncUrl = localStorage.getItem(SYNC_URL_KEY) || "";
+  let syncTimer = null;
+  let syncState = { status: "idle", lastSync: null, error: null }; // idle | busy | ok | err
+
+  function setSyncState(status, error){
+    syncState.status = status;
+    if(status==="ok") syncState.lastSync = Date.now();
+    syncState.error = error || null;
+    renderSyncStatus();
+  }
+
+  function scheduleSyncPush(){
+    if(!syncUrl) return;
+    if(syncTimer) clearTimeout(syncTimer);
+    syncTimer = setTimeout(pushToSheet, 1200);
+  }
+
+  function buildSyncPayload(){
+    return {
+      models: db.models.map(m=>({ id:m.id, brand:m.brand, model:m.model, ref:m.ref||"", desc:m.desc||"" })),
+      catalog: db.catalog,
+      field: db.field,
+      fx: db.fx,
+      budget: db.budget,
+      basketIds: db.basketIds
+    };
+  }
+
+  async function pushToSheet(){
+    if(!syncUrl) return;
+    setSyncState("busy");
+    try{
+      const res = await fetch(syncUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids CORS preflight against Apps Script
+        body: JSON.stringify(buildSyncPayload())
+      });
+      const data = await res.json();
+      if(!data.ok) throw new Error(data.error || "Bilinmeyen hata");
+      setSyncState("ok");
+    }catch(err){
+      setSyncState("err", err.message || String(err));
+    }
+  }
+
+  function isRemoteEmpty_(data){
+    return (!data.models || data.models.length===0)
+      && (!data.field || data.field.length===0)
+      && (!data.catalog || Object.keys(data.catalog).length===0);
+  }
+  function hasLocalData_(){
+    return db.models.length>0 || db.field.length>0 || Object.keys(db.catalog).length>0;
+  }
+  function applyRemoteData_(data){
+    // Preserve locally-stored photos by matching model id
+    const photoById = {};
+    db.models.forEach(m=>{ if(m.photo) photoById[m.id] = m.photo; });
+
+    db.models = (data.models||[]).map(m=>({ ...m, photo: photoById[m.id] || null }));
+    db.catalog = data.catalog || {};
+    db.field = data.field || [];
+    db.fx = data.fx || db.fx;
+    db.budget = (data.budget!==undefined && data.budget!==null && data.budget!=="") ? data.budget : db.budget;
+    db.basketIds = data.basketIds || [];
+  }
+
+  async function pullFromSheet(showBusy){
+    if(!syncUrl) return;
+    if(showBusy) setSyncState("busy");
+    try{
+      const res = await fetch(syncUrl, { method: "GET" });
+      const data = await res.json();
+      if(!data.ok) throw new Error(data.error || "Bilinmeyen hata");
+
+      // GÜVENLİK KİLİDİ: Sheet boş ama telefonda veri varsa, ASLA üzerine
+      // yazma — bunun yerine telefondaki veriyi Sheet'e gönder (seed).
+      if(isRemoteEmpty_(data) && hasLocalData_()){
+        await pushToSheet();
+        return;
+      }
+
+      applyRemoteData_(data);
+      persistLocal();
+      setSyncState("ok");
+      renderAll();
+    }catch(err){
+      setSyncState("err", err.message || String(err));
+    }
+  }
+
+  function renderSyncStatus(){
+    const dot = document.getElementById("syncDot");
+    const text = document.getElementById("syncStatusText");
+    const sub = document.getElementById("syncStatusSub");
+    const dashMeta = document.getElementById("dashSyncMeta");
+    if(!dot) return; // view not yet in DOM on very first call, guard anyway
+    if(!syncUrl){
+      dot.className = "sync-dot";
+      text.textContent = "Bağlı değil";
+      sub.textContent = "Yukarıya Web App URL'sini girip kaydet.";
+      if(dashMeta) dashMeta.textContent = "Bağlı değil";
+      return;
+    }
+    if(syncState.status==="busy"){
+      dot.className = "sync-dot busy";
+      text.textContent = "Senkronize ediliyor...";
+      sub.textContent = "";
+    }else if(syncState.status==="err"){
+      dot.className = "sync-dot err";
+      text.textContent = "Hata";
+      sub.textContent = syncState.error || "";
+    }else{
+      dot.className = "sync-dot ok";
+      text.textContent = "Bağlı";
+      sub.textContent = syncState.lastSync ? ("Son senkron: " + new Date(syncState.lastSync).toLocaleTimeString("tr-TR")) : "Henüz senkronize edilmedi.";
+    }
+    if(dashMeta) dashMeta.textContent = syncState.status==="err" ? "Hata" : (syncState.status==="ok" ? "Bağlı" : "Bekliyor");
+  }
 
   /* ============ NAV ============ */
   const views = document.querySelectorAll(".view");
@@ -1382,9 +1576,55 @@
     if(currentView==="fx") renderFx();
     if(currentView==="field") renderField();
     if(currentView==="basket") renderBasket();
+    if(currentView==="settings") renderSyncStatus();
   }
 
+  /* ============ BULK ADD MODELS ============ */
+  document.getElementById("bulkAddOpenBtn").addEventListener("click", ()=>{
+    document.getElementById("bulkAddText").value = "";
+    openModal("modal-bulk");
+  });
+  document.getElementById("bulkAddSaveBtn").addEventListener("click", ()=>{
+    const raw = document.getElementById("bulkAddText").value;
+    const lines = raw.split("\n").map(l=>l.trim()).filter(Boolean);
+    if(lines.length===0){ alert("En az bir satır girmelisin."); return; }
+    let added = 0, skipped = 0;
+    lines.forEach(line=>{
+      const parts = line.split("|").map(p=>p.trim());
+      const brand = parts[0] || "";
+      const model = parts[1] || "";
+      const ref = parts[2] || "";
+      const desc = parts[3] || "";
+      if(!brand || !model){ skipped++; return; }
+      db.models.push({ id: uid(), brand, model, ref, desc, photo: null });
+      added++;
+    });
+    save();
+    closeModal("modal-bulk");
+    renderAll();
+    alert(added + " model eklendi" + (skipped>0 ? (", " + skipped + " satır atlandı (marka/model eksik).") : "."));
+  });
+
+  /* ============ SETTINGS / SYNC WIRING ============ */
+  document.getElementById("syncUrlInput").value = syncUrl;
+  document.getElementById("syncUrlSaveBtn").addEventListener("click", ()=>{
+    const v = document.getElementById("syncUrlInput").value.trim();
+    syncUrl = v;
+    localStorage.setItem(SYNC_URL_KEY, v);
+    setSyncState("idle");
+    if(syncUrl) pullFromSheet(true);
+  });
+  document.getElementById("syncPullBtn").addEventListener("click", ()=>{
+    if(!syncUrl){ alert("Önce Web App URL'sini kaydet."); return; }
+    pullFromSheet(true);
+  });
+  document.getElementById("syncPushBtn").addEventListener("click", ()=>{
+    if(!syncUrl){ alert("Önce Web App URL'sini kaydet."); return; }
+    pushToSheet();
+  });
+
   renderAll();
+  if(syncUrl) pullFromSheet(true); // uygulama açılışında Sheets'teki en güncel veriyi çek
 })();
 </script>
 </body>
