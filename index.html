@@ -230,6 +230,9 @@
   }
 
   .modal-actions{display:flex;gap:10px;margin-top:20px;}
+  .deal-card{background:linear-gradient(135deg, rgba(201,162,75,.14), rgba(201,162,75,.04));border:1px solid var(--gold-dim);border-radius:var(--radius);padding:14px 16px;cursor:pointer;}
+  .deal-title{font-size:12px;letter-spacing:.4px;color:var(--gold-hi);font-weight:600;display:flex;align-items:center;gap:6px;}
+  .deal-sub{font-size:14.5px;color:var(--text);margin-top:6px;line-height:1.4;}
   .btn{
     flex:1;padding:13px;border-radius:11px;border:none;font-size:14.5px;font-weight:600;
     cursor:pointer;
@@ -372,6 +375,10 @@
 
   <!-- ================= DASHBOARD ================= -->
   <section class="view active" id="view-dashboard">
+    <div class="deal-card" id="bestDealCard" style="display:none;margin-bottom:14px;">
+      <div class="deal-title">🏆 <span id="bestDealTitle">En iyi fırsat</span></div>
+      <div class="deal-sub" id="bestDealSub"></div>
+    </div>
     <div class="dash-grid">
       <div class="dcard gold-edge" data-nav="models">
         <div class="icon">🕰️</div>
@@ -850,6 +857,29 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     const spent = basketTotal();
     const remain = db.budget - spent;
     document.getElementById("topRemain").textContent = fmtYen(remain);
+
+    renderBestDeal();
+  }
+
+  function renderBestDeal(){
+    const card = document.getElementById("bestDealCard");
+    let best = null;
+    db.field.forEach(it=>{
+      const wc = wcDiffInfo(it);
+      if(wc.diffPct===null) return;
+      if(!best || wc.diffPct > best.diffPct) best = { it, ...wc };
+    });
+    if(!best || best.diffPct<=0){
+      card.style.display = "none";
+      return;
+    }
+    const m = modelById(best.it.modelId);
+    document.getElementById("bestDealSub").textContent =
+      (m ? modelLabel(m) : "Bilinmeyen model") + " — " + (best.it.shop||"") +
+      " fiyatı WatchCharts piyasa ortalamasının %" + best.diffPct.toFixed(0) + " altında (" +
+      fmtYen(best.finalPrice) + " / ≈" + fmtYen(best.wcYen) + ")";
+    card.style.display = "block";
+    card.onclick = ()=>openDetailModal(best.it.modelId, {editTarget:"field", editId:best.it.id});
   }
 
   /* ============ RENDER: MODELS ============ */
@@ -1019,6 +1049,11 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
         const good = finalPrice <= limit;
         statusPill = `<span class="pill ${good?'good':'bad'}">${good?'Limit altında':'Limit üstünde'} ${diffPct>=0?'+':''}${diffPct.toFixed(0)}%</span>`;
       }
+      const wc = wcDiffInfo(it);
+      let wcPill = "";
+      if(wc.diffPct!==null){
+        wcPill = `<span class="pill ${wc.good?'good':'bad'}">WC: ${wc.good?'altında':'üstünde'} ${wc.diffPct>=0?'+':''}${wc.diffPct.toFixed(0)}%</span>`;
+      }
       return `
       <div class="item" data-open-field="${it.id}">
         <div class="thumb">${m && m.photo ? `<img src="${m.photo}">` : "⌚"}</div>
@@ -1029,6 +1064,7 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
             <span class="pill gold">${fmtYen(it.price)}</span>
             <span class="pill">Net: ${fmtYen(finalPrice)}</span>
             ${statusPill}
+            ${wcPill}
           </div>
         </div>
       </div>`;
@@ -1121,6 +1157,13 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     if(limit===null) return {finalPrice, limit:null, diffPct:null, good:null};
     const diffPct = ((limit - finalPrice)/limit)*100;
     return {finalPrice, limit, diffPct, good: finalPrice<=limit};
+  }
+  function wcDiffInfo(it){
+    const finalPrice = computeFieldFinal(it);
+    const wcYen = computeWcYen(it.modelId);
+    if(wcYen===null) return {finalPrice, wcYen:null, diffPct:null, good:null};
+    const diffPct = ((wcYen - finalPrice)/wcYen)*100; // pozitif = WatchCharts ortalamasının altında (fırsat)
+    return {finalPrice, wcYen, diffPct, good: finalPrice<=wcYen};
   }
 
   function openBasketPicker(){
@@ -1248,13 +1291,18 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
         const statusPill = diffPct===null
           ? `<span class="pill">Limit yok</span>`
           : `<span class="pill ${good?'good':'bad'}">${good?'Limit altında':'Limit üstünde'} ${diffPct>=0?'+':''}${diffPct.toFixed(0)}%</span>`;
+        const wc = wcDiffInfo(it);
+        const wcPill = wc.diffPct===null
+          ? ""
+          : `<span class="pill ${wc.good?'good':'bad'}">WatchCharts: ${wc.good?'altında':'üstünde'} ${wc.diffPct>=0?'+':''}${wc.diffPct.toFixed(0)}%</span>`;
         document.getElementById("detailFieldFigures").innerHTML = `
           <span class="pill">${esc(it.shop||"")}</span>
           <span class="pill">${esc(it.city||"")}</span>
           <span class="pill gold">${fmtYen(it.price)}</span>
           <span class="pill">Taxback: %${it.taxback||0}</span>
           <span class="pill">Net: ${fmtYen(finalPrice)}</span>
-          ${statusPill}`;
+          ${statusPill}
+          ${wcPill}`;
         fieldSection.style.display = "block";
       } else { fieldSection.style.display = "none"; }
     } else {
