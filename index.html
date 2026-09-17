@@ -607,19 +607,15 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
       <label>Model Seç</label>
       <select id="catalogModelSelect"></select>
     </div>
-    <div class="field-row">
-      <div class="field"><label>TR Fiyatı (₺)</label><input type="number" id="catalogTrPrice" placeholder="0"></div>
-      <div class="field"><label>TR 2.El Fiyatı (₺)</label><input type="number" id="catalogTrUsed" placeholder="0"></div>
+    <div class="field">
+      <label>Chrono24 Ortalama Fiyatı (¥)</label>
+      <input type="number" id="catalogChrono24Price" placeholder="0">
+      <div class="hint">Chrono24'te bölgeyi Yen'e ayarlayıp baktığın güncel piyasa ortalaması</div>
     </div>
     <div class="field">
-      <label>Alım Alt Limit Yüzdesi (%)</label>
-      <input type="number" id="catalogLimitPct" placeholder="55">
-      <div class="hint">Alt limit = TR Fiyatı (¥'ye çevrilmiş) × bu yüzde</div>
-    </div>
-    <div class="field">
-      <label>WatchCharts Piyasa Değeri (USD)</label>
-      <input type="number" id="catalogWcUsd" placeholder="0">
-      <div class="hint">watchcharts.com'daki güncel ikinci el piyasa değeri — otomatik ¥'ye çevrilip referans olarak gösterilir</div>
+      <label>Hedef Katsayı (%)</label>
+      <input type="number" id="catalogTargetPct" placeholder="70">
+      <div class="hint">Hedef Fiyat = Chrono24 Fiyatı × bu yüzde. Komisyon, pazarlık payı ve kendi arbitraj marjın buraya dahil.</div>
     </div>
     <div class="modal-actions">
       <button class="btn btn-danger" id="catalogDeleteBtn" style="display:none;">Sil</button>
@@ -756,7 +752,7 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     }catch(e){}
     return {
       models: [],
-      catalog: {},   // modelId -> {trPrice, trUsed, limitPct, wcUsd}
+      catalog: {},   // modelId -> {chrono24Price, targetPct}
       field: [],     // {id, modelId, shop, city, price, taxback}
       fx: {rate: null, updated: null, manual: false},        // TL -> YEN
       fxUsd: {rate: null, updated: null, manual: false},      // USD -> YEN
@@ -810,17 +806,6 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     if(n===null||n===undefined||isNaN(n)) return "₺—";
     return "₺" + Math.round(n).toLocaleString("tr-TR");
   }
-  function getFxRate(){ return db.fx.rate; }
-  function trToYen(tl){
-    const r = getFxRate();
-    if(!r || !tl) return null;
-    return tl * r;
-  }
-  function usdToYen(usd){
-    const r = db.fxUsd.rate;
-    if(!r || !usd) return null;
-    return usd * r;
-  }
 
   function modelById(id){ return db.models.find(m=>m.id===id); }
   function modelLabel(m){
@@ -828,17 +813,10 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     return m.brand + " " + m.model + (m.ref ? " · "+m.ref : "");
   }
 
-  function computeLimit(modelId){
+  function computeTarget(modelId){
     const c = db.catalog[modelId];
-    if(!c || !c.trPrice || !c.limitPct) return null;
-    const yen = trToYen(c.trPrice);
-    if(yen===null) return null;
-    return yen * (c.limitPct/100);
-  }
-  function computeWcYen(modelId){
-    const c = db.catalog[modelId];
-    if(!c || !c.wcUsd) return null;
-    return usdToYen(c.wcUsd);
+    if(!c || !c.chrono24Price || !c.targetPct) return null;
+    return c.chrono24Price * (c.targetPct/100);
   }
   function computeFieldFinal(item){
     const tb = (item.taxback||0)/100;
@@ -865,9 +843,9 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     const card = document.getElementById("bestDealCard");
     let best = null;
     db.field.forEach(it=>{
-      const wc = wcDiffInfo(it);
-      if(wc.diffPct===null) return;
-      if(!best || wc.diffPct > best.diffPct) best = { it, ...wc };
+      const info = fieldDiffInfo(it);
+      if(info.diffPct===null) return;
+      if(!best || info.diffPct > best.diffPct) best = { it, ...info };
     });
     if(!best || best.diffPct<=0){
       card.style.display = "none";
@@ -876,8 +854,8 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     const m = modelById(best.it.modelId);
     document.getElementById("bestDealSub").textContent =
       (m ? modelLabel(m) : "Bilinmeyen model") + " — " + (best.it.shop||"") +
-      " fiyatı WatchCharts piyasa ortalamasının %" + best.diffPct.toFixed(0) + " altında (" +
-      fmtYen(best.finalPrice) + " / ≈" + fmtYen(best.wcYen) + ")";
+      " fiyatı hedefin %" + best.diffPct.toFixed(0) + " altında (" +
+      fmtYen(best.finalPrice) + " / hedef ≈" + fmtYen(best.target) + ")";
     card.style.display = "block";
     card.onclick = ()=>openDetailModal(best.it.modelId, {editTarget:"field", editId:best.it.id});
   }
@@ -918,13 +896,11 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     }
     list.innerHTML = db.models.map(m=>{
       const c = db.catalog[m.id];
-      const limit = c ? computeLimit(m.id) : null;
-      const wcYen = c ? computeWcYen(m.id) : null;
-      const figures = c
-        ? `<span class="pill">TR: ${fmtTl(c.trPrice)}</span>
-           <span class="pill">2.El: ${fmtTl(c.trUsed)}</span>
-           <span class="pill gold">Alt Limit: ${limit!==null ? fmtYen(limit) : "kur bekleniyor"}</span>
-           ${c.wcUsd ? `<span class="pill">WC: $${Math.round(c.wcUsd).toLocaleString("tr-TR")}${wcYen!==null ? " ≈ "+fmtYen(wcYen) : ""}</span>` : ""}`
+      const hasPrice = c && c.chrono24Price;
+      const target = hasPrice ? computeTarget(m.id) : null;
+      const figures = hasPrice
+        ? `<span class="pill">Chrono24: ${fmtYen(c.chrono24Price)}</span>
+           <span class="pill gold">Hedef (%${c.targetPct}): ${target!==null ? fmtYen(target) : "—"}</span>`
         : `<span class="pill gold">Fiyat girilmedi — dokun</span>`;
       return `
       <div class="item" data-open-catalog="${m.id}">
@@ -1042,17 +1018,12 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     list.innerHTML = items.map(it=>{
       const m = modelById(it.modelId);
       const finalPrice = computeFieldFinal(it);
-      const limit = computeLimit(it.modelId);
-      let statusPill = `<span class="pill">Limit yok</span>`;
-      if(limit!==null){
-        const diffPct = ((limit - finalPrice)/limit)*100;
-        const good = finalPrice <= limit;
-        statusPill = `<span class="pill ${good?'good':'bad'}">${good?'Limit altında':'Limit üstünde'} ${diffPct>=0?'+':''}${diffPct.toFixed(0)}%</span>`;
-      }
-      const wc = wcDiffInfo(it);
-      let wcPill = "";
-      if(wc.diffPct!==null){
-        wcPill = `<span class="pill ${wc.good?'good':'bad'}">WC: ${wc.good?'altında':'üstünde'} ${wc.diffPct>=0?'+':''}${wc.diffPct.toFixed(0)}%</span>`;
+      const target = computeTarget(it.modelId);
+      let statusPill = `<span class="pill">Hedef yok</span>`;
+      if(target!==null){
+        const diffPct = ((target - finalPrice)/target)*100;
+        const good = finalPrice <= target;
+        statusPill = `<span class="pill ${good?'good':'bad'}">${good?'Hedefin altında':'Hedefin üstünde'} ${diffPct>=0?'+':''}${diffPct.toFixed(0)}%</span>`;
       }
       return `
       <div class="item" data-open-field="${it.id}">
@@ -1064,7 +1035,6 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
             <span class="pill gold">${fmtYen(it.price)}</span>
             <span class="pill">Net: ${fmtYen(finalPrice)}</span>
             ${statusPill}
-            ${wcPill}
           </div>
         </div>
       </div>`;
@@ -1153,17 +1123,10 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
 
   function fieldDiffInfo(it){
     const finalPrice = computeFieldFinal(it);
-    const limit = computeLimit(it.modelId);
-    if(limit===null) return {finalPrice, limit:null, diffPct:null, good:null};
-    const diffPct = ((limit - finalPrice)/limit)*100;
-    return {finalPrice, limit, diffPct, good: finalPrice<=limit};
-  }
-  function wcDiffInfo(it){
-    const finalPrice = computeFieldFinal(it);
-    const wcYen = computeWcYen(it.modelId);
-    if(wcYen===null) return {finalPrice, wcYen:null, diffPct:null, good:null};
-    const diffPct = ((wcYen - finalPrice)/wcYen)*100; // pozitif = WatchCharts ortalamasının altında (fırsat)
-    return {finalPrice, wcYen, diffPct, good: finalPrice<=wcYen};
+    const target = computeTarget(it.modelId);
+    if(target===null) return {finalPrice, target:null, diffPct:null, good:null};
+    const diffPct = ((target - finalPrice)/target)*100;
+    return {finalPrice, target, diffPct, good: finalPrice<=target};
   }
 
   function openBasketPicker(){
@@ -1270,14 +1233,11 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
 
     const catalogSection = document.getElementById("detailCatalogSection");
     const c = m ? db.catalog[m.id] : null;
-    if(c){
-      const limit = computeLimit(m.id);
-      const wcYen = computeWcYen(m.id);
+    if(c && c.chrono24Price){
+      const target = computeTarget(m.id);
       document.getElementById("detailCatalogFigures").innerHTML = `
-        <span class="pill">TR: ${fmtTl(c.trPrice)}</span>
-        <span class="pill">2.El: ${fmtTl(c.trUsed)}</span>
-        <span class="pill gold">Alt Limit: ${limit!==null ? fmtYen(limit) : "kur bekleniyor"}</span>
-        ${c.wcUsd ? `<span class="pill">WatchCharts: $${Math.round(c.wcUsd).toLocaleString("tr-TR")}${wcYen!==null ? " ≈ "+fmtYen(wcYen) : ""}</span>` : ""}`;
+        <span class="pill">Chrono24: ${fmtYen(c.chrono24Price)}</span>
+        <span class="pill gold">Hedef (%${c.targetPct}): ${target!==null ? fmtYen(target) : "—"}</span>`;
       catalogSection.style.display = "block";
     } else {
       catalogSection.style.display = "none";
@@ -1289,20 +1249,15 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
       if(it){
         const {finalPrice, diffPct, good} = fieldDiffInfo(it);
         const statusPill = diffPct===null
-          ? `<span class="pill">Limit yok</span>`
-          : `<span class="pill ${good?'good':'bad'}">${good?'Limit altında':'Limit üstünde'} ${diffPct>=0?'+':''}${diffPct.toFixed(0)}%</span>`;
-        const wc = wcDiffInfo(it);
-        const wcPill = wc.diffPct===null
-          ? ""
-          : `<span class="pill ${wc.good?'good':'bad'}">WatchCharts: ${wc.good?'altında':'üstünde'} ${wc.diffPct>=0?'+':''}${wc.diffPct.toFixed(0)}%</span>`;
+          ? `<span class="pill">Hedef yok</span>`
+          : `<span class="pill ${good?'good':'bad'}">${good?'Hedefin altında':'Hedefin üstünde'} ${diffPct>=0?'+':''}${diffPct.toFixed(0)}%</span>`;
         document.getElementById("detailFieldFigures").innerHTML = `
           <span class="pill">${esc(it.shop||"")}</span>
           <span class="pill">${esc(it.city||"")}</span>
           <span class="pill gold">${fmtYen(it.price)}</span>
           <span class="pill">Taxback: %${it.taxback||0}</span>
           <span class="pill">Net: ${fmtYen(finalPrice)}</span>
-          ${statusPill}
-          ${wcPill}`;
+          ${statusPill}`;
         fieldSection.style.display = "block";
       } else { fieldSection.style.display = "none"; }
     } else {
@@ -1312,7 +1267,7 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     const editContextBtn = document.getElementById("detailEditContextBtn");
     if(opts.editTarget==="catalog"){
       editContextBtn.style.display = "block";
-      editContextBtn.textContent = c ? "Fiyatı Düzenle" : "Fiyat Gir";
+      editContextBtn.textContent = (c && c.chrono24Price) ? "Fiyatı Düzenle" : "Fiyat Gir";
       editContextBtn.onclick = ()=>{ closeModal("modal-detail"); openCatalogModal(opts.editId); };
     } else if(opts.editTarget==="field"){
       editContextBtn.style.display = "block";
@@ -1431,21 +1386,17 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     document.getElementById("catalogModalTitle").textContent = m ? modelLabel(m) : (c ? "Fiyatı Düzenle" : "Fiyat Ekle");
     if(modelId) sel.value = modelId;
     sel.disabled = true;
-    document.getElementById("catalogTrPrice").value = c ? c.trPrice : "";
-    document.getElementById("catalogTrUsed").value = c ? c.trUsed : "";
-    document.getElementById("catalogLimitPct").value = c ? c.limitPct : "";
-    document.getElementById("catalogWcUsd").value = c && c.wcUsd ? c.wcUsd : "";
+    document.getElementById("catalogChrono24Price").value = c && c.chrono24Price ? c.chrono24Price : "";
+    document.getElementById("catalogTargetPct").value = c && c.targetPct ? c.targetPct : "";
     document.getElementById("catalogDeleteBtn").style.display = c ? "block" : "none";
     openModal("modal-catalog");
   }
   document.getElementById("catalogSaveBtn").addEventListener("click", ()=>{
     const modelId = document.getElementById("catalogModelSelect").value;
     if(!modelId){ alert("Model seç."); return; }
-    const trPrice = parseFloat(document.getElementById("catalogTrPrice").value) || 0;
-    const trUsed = parseFloat(document.getElementById("catalogTrUsed").value) || 0;
-    const limitPct = parseFloat(document.getElementById("catalogLimitPct").value) || 0;
-    const wcUsd = parseFloat(document.getElementById("catalogWcUsd").value) || 0;
-    db.catalog[modelId] = {trPrice, trUsed, limitPct, wcUsd};
+    const chrono24Price = parseFloat(document.getElementById("catalogChrono24Price").value) || 0;
+    const targetPct = parseFloat(document.getElementById("catalogTargetPct").value) || 0;
+    db.catalog[modelId] = {chrono24Price, targetPct};
     save();
     closeModal("modal-catalog");
     renderAll();
@@ -1556,12 +1507,13 @@ Citizen | Promaster | BN0150-28E | Dalgıç saati"></textarea>
     db.models.forEach(m=>modelsAOA.push([m.brand||"", m.model||"", m.ref||"", m.desc||""]));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(modelsAOA), "Modeller");
 
-    const catalogAOA = [["Marka / Model","TR Fiyatı (₺)","TR 2.El Fiyatı (₺)","Alt Limit (%)","WatchCharts (USD)","WatchCharts (≈¥)"]];
+    const catalogAOA = [["Marka / Model","Chrono24 Fiyatı (¥)","Hedef Katsayı (%)","Hedef Fiyat (¥)"]];
     Object.keys(db.catalog).forEach(id=>{
       const m = modelById(id);
       const c = db.catalog[id];
-      const wcYen = computeWcYen(id);
-      catalogAOA.push([m ? modelLabel(m) : id, c.trPrice||"", c.trUsed||"", c.limitPct||"", c.wcUsd||"", wcYen!==null ? Math.round(wcYen) : ""]);
+      if(!c.chrono24Price) return;
+      const target = computeTarget(id);
+      catalogAOA.push([m ? modelLabel(m) : id, c.chrono24Price||"", c.targetPct||"", target!==null ? Math.round(target) : ""]);
     });
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(catalogAOA), "Katalog");
 
